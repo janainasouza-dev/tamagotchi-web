@@ -1,103 +1,127 @@
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
+const crypto = require('crypto');
+
+// Quanto cada status cai por hora (0 a 100)
+const DECAY_PER_HOUR = { hunger: 5, happiness: 3, energy: 2 };
+
+const clamp = (v) => Math.max(0, Math.min(100, v));
+
+// Efeito de cada ação nos status
+const ACTIONS = {
+  feed:  (p) => ({ hunger: p.hunger + 30 }),
+  play:  (p) => ({ happiness: p.happiness + 25, energy: p.energy - 10 }),
+  sleep: (p) => ({ energy: p.energy + 40 }),
+};
 
 class Database {
-  constructor() {
-    this.db = new sqlite3.Database(path.join(__dirname, 'tamagotchi.db'));
-    this.init();
+  constructor(file = path.join(__dirname, 'tamagotchi.db')) {
+    this.db = new sqlite3.Database(file);
+    this.ready = this.init();
   }
 
-  init() {
-    this.db.run(`
+  // --- helpers que transformam o sqlite3 em Promises ---
+  run(sql, params = []) {
+    return new Promise((resolve, reject) => {
+      this.db.run(sql, params, function (err) {
+        err ? reject(err) : resolve(this);
+      });
+    });
+  }
+
+  get(sql, params = []) {
+    return new Promise((resolve, reject) => {
+      this.db.get(sql, params, (err, row) => (err ? reject(err) : resolve(row)));
+    });
+  }
+
+  all(sql, params = []) {
+    return new Promise((resolve, reject) => {
+      this.db.all(sql, params, (err, rows) => (err ? reject(err) : resolve(rows)));
+    });
+  }
+
+  // --- criação / migração da tabela ---
+  async init() {
+    await this.run(`
       CREATE TABLE IF NOT EXISTS pets (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
-        hunger INTEGER DEFAULT 100,
-        happiness INTEGER DEFAULT 100,
-        energy INTEGER DEFAULT 100,
-        last_interaction TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        hunger REAL DEFAULT 100,
+        happiness REAL DEFAULT 100,
+        energy REAL DEFAULT 100,
+        last_update INTEGER
       )
     `);
+
+    // Bancos antigos (da versão anterior) não têm a coluna last_update
+    const cols = await this.all('PRAGMA table_info(pets)');
+    if (!cols.some((c) => c.name === 'last_update')) {
+      await this.run('ALTER TABLE pets ADD COLUMN last_update INTEGER');
+    }
+    await this.run('UPDATE pets SET last_update = ? WHERE last_update IS NULL', [Date.now()]);
   }
 
-  createPet(name) {
-    const id = Math.random().toString(36).substr(2, 9);
-    const stmt = this.db.prepare(`
-      INSERT INTO pets (id, name, hunger, happiness, energy, last_interaction)
-      VALUES (?, ?, 100, 100, 100, datetime('now'))
-    `);
-    stmt.run(id, name);
-    stmt.finalize();
+  // --- regras do jogo ---
+  // Calcula quanto os status caíram desde a última atualização
+  applyDecay(pet, now = Date.now()) {
+    const hours = Math.max(0, (now - pet.last_update) / 3600000);
+    return {
+      ...pet,
+      hunger: clamp(pet.hunger - hours * DECAY_PER_HOUR.hunger),
+      happiness: clamp(pet.happiness - hours * DECAY_PER_HOUR.happiness),
+      energy: clamp(pet.energy - hours * DECAY_PER_HOUR.energy),
+      last_update: now,
+    };
+  }
+
+  async save(pet) {
+    await this.run(
+      'UPDATE pets SET hunger = ?, happiness = ?, energy = ?, last_update = ? WHERE id = ?',
+      [pet.hunger, pet.happiness, pet.energy, pet.last_update, pet.id]
+    );
+    return pet;
+  }
+
+  async createPet(name) {
+    await this.ready;
+    const id = crypto.randomBytes(5).toString('hex');
+    const now = Date.now();
+    await this.run(
+      'INSERT INTO pets (id, name, hunger, happiness, energy, last_update) VALUES (?, ?, 100, 100, 100, ?)',
+      [id, name, now]
+    );
     return this.getPet(id);
   }
 
-  getPet(id) {
-    return new Promise((resolve, reject) => {
-      this.db.get('SELECT * FROM pets WHERE id = ?', [id], (err, row) => {
-        if (err) reject(err);
-        resolve(row);
-      });
-    });
+  // Busca o pet já com o tempo passado aplicado
+  async getPet(id) {
+    await this.ready;
+    const row = await this.get('SELECT * FROM pets WHERE id = ?', [id]);
+    if (!row) return null;
+    return this.save(this.applyDecay(row));
   }
 
-  updateStats(id) {
-    return new Promise((resolve, reject) => {
-      this.db.get('SELECT * FROM pets WHERE id = ?', [id], (err, pet) => {
-        if (err || !pet) {
-          reject(err);
-          return;
-        }
+  async doAction(id, action) {
+    if (!ACTIONS[action]) {
+      const err = new Error('Ação inválida');
+      err.status = 400;
+      throw err;
+    }
+    const pet = await this.getPet(id);
+    if (!pet) return null;
 
-        const now = new Date();
-        const lastInteraction = new Date(pet.last_interaction);
-        const hoursPassed = (now - lastInteraction) / (1000 * 60 * 60);
+    if (action === 'play' && pet.energy < 10) {
+      const err = new Error('Seu pet está cansado demais para brincar. Deixe-o dormir!');
+      err.status = 400;
+      throw err;
+    }
 
-        if (hoursPassed > 0) {
-          const hungerDecay = Math.min(100, hoursPassed * 5);
-          const happinessDecay = Math.min(100, hoursPassed * 3);
-          const energyDecay = Math.min(100, hoursPassed * 2);
-
-          const newHunger = Math.max(0, pet.hunger - hungerDecay);
-          const newHappiness = Math.max(0, pet.happiness - happinessDecay);
-          const newEnergy = Math.max(0, pet.energy - energyDecay);
-
-          this.db.run(`
-            UPDATE pets 
-            SET hunger = ?, happiness = ?, energy = ?, last_interaction = datetime('now')
-            WHERE id = ?
-          `, [newHunger, newHappiness, newEnergy, id]);
-          
-          pet.hunger = newHunger;
-          pet.happiness = newHappiness;
-          pet.energy = newEnergy;
-        }
-        
-        resolve(pet);
-      });
-    });
-  }
-
-  async feedPet(id) {
-    const pet = await this.updateStats(id);
-    const newHunger = Math.min(100, pet.hunger + 30);
-    this.db.run('UPDATE pets SET hunger = ?, last_interaction = datetime("now") WHERE id = ?', [newHunger, id]);
-    return this.getPet(id);
-  }
-
-  async playWithPet(id) {
-    const pet = await this.updateStats(id);
-    const newHappiness = Math.min(100, pet.happiness + 25);
-    const newEnergy = Math.max(0, pet.energy - 10);
-    this.db.run('UPDATE pets SET happiness = ?, energy = ?, last_interaction = datetime("now") WHERE id = ?', [newHappiness, newEnergy, id]);
-    return this.getPet(id);
-  }
-
-  async sleepPet(id) {
-    const pet = await this.updateStats(id);
-    const newEnergy = Math.min(100, pet.energy + 40);
-    this.db.run('UPDATE pets SET energy = ?, last_interaction = datetime("now") WHERE id = ?', [newEnergy, id]);
-    return this.getPet(id);
+    const changes = ACTIONS[action](pet);
+    for (const [key, value] of Object.entries(changes)) {
+      pet[key] = clamp(value);
+    }
+    return this.save(pet);
   }
 }
 

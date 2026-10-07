@@ -1,29 +1,22 @@
 const express = require('express');
 const cors = require('cors');
-const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
+const Database = require('./database');
 
 const app = express();
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
+const db = new Database();
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static('public'));
+// Serve o frontend (index.html, style.css, app.js)
+app.use(express.static(path.join(__dirname, 'public')));
 
-// Banco de dados
-const db = new sqlite3.Database('./tamagotchi.db');
-
-// Criar tabela
-db.run(`
-  CREATE TABLE IF NOT EXISTS pets (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    hunger INTEGER DEFAULT 100,
-    happiness INTEGER DEFAULT 100,
-    energy INTEGER DEFAULT 100,
-    last_interaction DATETIME DEFAULT CURRENT_TIMESTAMP
-  )
-`);
+const wrap = (fn) => (req, res) =>
+  fn(req, res).catch((err) => {
+    if (!err.status || err.status >= 500) console.error(err);
+    res.status(err.status || 500).json({ error: err.message });
+  });
 
 // Rota de teste
 app.get('/api/test', (req, res) => {
@@ -31,86 +24,26 @@ app.get('/api/test', (req, res) => {
 });
 
 // Criar pet
-app.post('/api/pet', (req, res) => {
-  const { name } = req.body;
-  const id = Math.random().toString(36).substr(2, 9);
-  
-  db.run(
-    'INSERT INTO pets (id, name, hunger, happiness, energy) VALUES (?, ?, 100, 100, 100)',
-    [id, name],
-    function(err) {
-      if (err) {
-        res.status(500).json({ error: err.message });
-        return;
-      }
-      res.json({ id, name, hunger: 100, happiness: 100, energy: 100 });
-    }
-  );
-});
+app.post('/api/pet', wrap(async (req, res) => {
+  const name = String(req.body.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'Informe um nome para o pet' });
+  if (name.length > 20) return res.status(400).json({ error: 'O nome pode ter no máximo 20 caracteres' });
+  res.status(201).json(await db.createPet(name));
+}));
 
-// Buscar pet
-app.get('/api/pet/:id', (req, res) => {
-  db.get('SELECT * FROM pets WHERE id = ?', [req.params.id], (err, row) => {
-    if (err) {
-      res.status(500).json({ error: err.message });
-    } else if (!row) {
-      res.status(404).json({ error: 'Pet não encontrado' });
-    } else {
-      res.json(row);
-    }
-  });
-});
+// Buscar pet (já com os status atualizados pelo tempo)
+app.get('/api/pet/:id', wrap(async (req, res) => {
+  const pet = await db.getPet(req.params.id);
+  if (!pet) return res.status(404).json({ error: 'Pet não encontrado' });
+  res.json(pet);
+}));
 
-// Alimentar
-app.post('/api/pet/:id/feed', (req, res) => {
-  db.get('SELECT * FROM pets WHERE id = ?', [req.params.id], (err, pet) => {
-    if (err || !pet) {
-      res.status(404).json({ error: 'Pet não encontrado' });
-      return;
-    }
-    
-    const newHunger = Math.min(100, pet.hunger + 30);
-    db.run('UPDATE pets SET hunger = ?, last_interaction = CURRENT_TIMESTAMP WHERE id = ?', 
-      [newHunger, req.params.id]);
-    res.json({ ...pet, hunger: newHunger });
-  });
-});
-
-// Brincar
-app.post('/api/pet/:id/play', (req, res) => {
-  db.get('SELECT * FROM pets WHERE id = ?', [req.params.id], (err, pet) => {
-    if (err || !pet) {
-      res.status(404).json({ error: 'Pet não encontrado' });
-      return;
-    }
-    
-    const newHappiness = Math.min(100, pet.happiness + 25);
-    const newEnergy = Math.max(0, pet.energy - 10);
-    db.run('UPDATE pets SET happiness = ?, energy = ?, last_interaction = CURRENT_TIMESTAMP WHERE id = ?', 
-      [newHappiness, newEnergy, req.params.id]);
-    res.json({ ...pet, happiness: newHappiness, energy: newEnergy });
-  });
-});
-
-// Dormir
-app.post('/api/pet/:id/sleep', (req, res) => {
-  db.get('SELECT * FROM pets WHERE id = ?', [req.params.id], (err, pet) => {
-    if (err || !pet) {
-      res.status(404).json({ error: 'Pet não encontrado' });
-      return;
-    }
-    
-    const newEnergy = Math.min(100, pet.energy + 40);
-    db.run('UPDATE pets SET energy = ?, last_interaction = CURRENT_TIMESTAMP WHERE id = ?', 
-      [newEnergy, req.params.id]);
-    res.json({ ...pet, energy: newEnergy });
-  });
-});
-
-// Servir arquivo HTML
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
+// Ações: feed (alimentar), play (brincar), sleep (dormir)
+app.post('/api/pet/:id/:action', wrap(async (req, res) => {
+  const pet = await db.doAction(req.params.id, req.params.action);
+  if (!pet) return res.status(404).json({ error: 'Pet não encontrado' });
+  res.json(pet);
+}));
 
 app.listen(PORT, () => {
   console.log(`✅ Servidor rodando em http://localhost:${PORT}`);

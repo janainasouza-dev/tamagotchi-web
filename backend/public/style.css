@@ -1,0 +1,127 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.container {
+  background: white;
+  border-radius: 20px;
+  padding: 30px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  max-width: 500px;
+  width: 90%;
+  text-align: center;
+}
+
+h1 { color: #333; margin-bottom: 20px; }
+h2 { color: #667eea; margin: 10px 0 0; }
+
+.pet-mood { color: #777; margin-bottom: 10px; min-height: 1.4em; }
+
+/* ---------- Pet e animações ---------- */
+.pet-emoji { font-size: 100px; margin: 20px 0 5px; }
+.pet-emoji.idle     { animation: bounce 2s infinite; }
+.pet-emoji.happy    { animation: jump 0.8s infinite; }
+.pet-emoji.sad      { animation: sway 3s infinite; }
+.pet-emoji.sleeping { animation: breathe 3s infinite; }
+
+@keyframes bounce  { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+@keyframes jump    { 0%, 100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-22px) scale(1.05); } }
+@keyframes sway    { 0%, 100% { transform: rotate(-4deg); } 50% { transform: rotate(4deg); } }
+@keyframes breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+
+/* ---------- Barras de status ---------- */
+.status-bar { margin: 15px 0; text-align: left; }
+.status-label { display: block; margin-bottom: 5px; font-weight: bold; }
+
+.bar-container {
+  background: #eee;
+  border-radius: 10px;
+  overflow: hidden;
+  height: 20px;
+}
+
+.bar { height: 100%; transition: width 0.4s, background-color 0.4s; }
+.bar.good     { background: #4ecdc4; }
+.bar.warning  { background: #ffe66d; }
+.bar.critical { background: #ff6b6b; }
+
+/* ---------- Botões ---------- */
+.actions { display: flex; gap: 10px; margin-top: 20px; }
+
+button {
+  flex: 1;
+  padding: 12px;
+  font-size: 16px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: transform 0.2s, opacity 0.2s;
+  font-weight: bold;
+}
+button:hover:not(:disabled) { transform: translateY(-2px); }
+button:disabled { opacity: 0.6; cursor: wait; }
+
+.btn-feed  { background: #ff6b6b; color: white; }
+.btn-play  { background: #4ecdc4; color: white; }
+.btn-sleep { background: #ffe66d; color: #333; }
+
+.btn-link {
+  flex: none;
+  margin-top: 20px;
+  padding: 6px 10px;
+  background: none;
+  color: #999;
+  font-size: 13px;
+  font-weight: normal;
+  text-decoration: underline;
+}
+
+/* ---------- Tela de adoção ---------- */
+.create-pet input {
+  padding: 12px;
+  font-size: 16px;
+  border: 2px solid #ddd;
+  border-radius: 8px;
+  margin: 10px;
+  width: 200px;
+}
+.create-pet input:focus { outline: none; border-color: #667eea; }
+.create-pet button { background: #667eea; color: white; padding: 12px 24px; flex: none; }
+
+/* ---------- Avisos ---------- */
+.banner {
+  background: #fff3cd;
+  color: #7a5b00;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 15px;
+  font-size: 14px;
+}
+
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translate(-50%, 20px);
+  background: #333;
+  color: white;
+  padding: 10px 18px;
+  border-radius: 8px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s, transform 0.3s;
+  max-width: 90%;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+@media (max-width: 420px) {
+  .pet-emoji { font-size: 80px; }
+  .actions { flex-direction: column; }
+}

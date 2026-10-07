@@ -1,0 +1,2 @@
+# Evita o "arquivo todo modificado" por causa de CRLF (Windows) x LF
+* text=auto
