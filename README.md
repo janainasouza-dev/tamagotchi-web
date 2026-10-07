@@ -1,4 +1,4 @@
-# 🐣 Tamagotchi Web
+# Tamagotchi Web
 
 Um Tamagotchi para jogar no navegador. Frontend em **HTML, CSS e JavaScript puros**; backend em **Node.js + Express + SQLite**.
 
